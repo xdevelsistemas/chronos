@@ -1,11 +1,15 @@
-FROM ubuntu:14.04
+FROM xdevelsistemas/debian-env:java7-env
+
+RUN apt-get update && \ 
+    apt-get install -y curl && \
+    curl -sL https://deb.nodesource.com/setup | bash - && \
+    apt-get install -y nodejs
+
 
 RUN echo "deb http://repos.mesosphere.io/ubuntu/ trusty main" > /etc/apt/sources.list.d/mesosphere.list && \
     apt-key adv --keyserver keyserver.ubuntu.com --recv E56151BF && \
     apt-get update && \
     apt-get install -y maven \
-    node \
-    npm \
     default-jdk \
     mesos \
     scala \
