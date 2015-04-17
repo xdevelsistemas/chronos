@@ -20,6 +20,10 @@ trait CassandraConfiguration extends ScallopConf {
     descr = "Table to use for Cassandra",
     default = Some("chronos"))
 
+  lazy val cassandraStatCountTable = opt[String]("cassandra_stat_count_table",
+    descr = "Table to track stat counts in Cassandra",
+    default = Some("chronos_stat_count"))
+
   lazy val cassandraConsistency = opt[String]("cassandra_consistency",
     descr = "Consistency to use for Cassandra",
     default = Some("ANY"))
@@ -27,4 +31,8 @@ trait CassandraConfiguration extends ScallopConf {
   lazy val cassandraTtl = opt[Int]("cassandra_ttl",
     descr = "TTL for records written to Cassandra",
     default = Some(3600 * 24 * 365))
+
+  lazy val jobHistoryLimit = opt[Int]("job_history_limit",
+    descr = "Number of past job executions to show in history view",
+    default = Some(5))
 }

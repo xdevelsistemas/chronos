@@ -70,12 +70,6 @@ trait SchedulerConfiguration extends ScallopConf {
   lazy val slackWebhookUrl = opt[String]("slack_url",
     descr = "Webhook URL for posting to Slack",
     default = None)
-  lazy val slackToken = opt[String]("slack_token",
-    descr = "Token needed for posting to Slack",
-    default = None)
-  lazy val slackChannel = opt[String]("slack_channel",
-    descr = "The channel to post to in Slack",
-    default = None)
   lazy val failureRetryDelayMs = opt[Long]("failure_retry",
     descr = "Number of ms between retries",
     default = Some(60000))
@@ -106,9 +100,20 @@ trait SchedulerConfiguration extends ScallopConf {
   lazy val mesosFrameworkName = opt[String]("mesos_framework_name",
     descr = "The framework name",
     default = Some("chronos-" + version))
+  lazy val webuiUrl = opt[String]("webui_url",
+    descr = "The http(s) url of the web ui, defaulting to the advertised hostname",
+    noshort = true,
+    default = None)
   lazy val reconciliationInterval = opt[Int]("reconciliation_interval",
     descr = "Reconciliation interval in seconds",
     default = Some(600))
+  lazy val mesosAuthenticationPrincipal = opt[String]("mesos_authentication_principal",
+    descr = "Mesos Authentication Principal",
+    noshort = true)
+  lazy val mesosAuthenticationSecretFile = opt[String]("mesos_authentication_secret_file",
+    descr = "Mesos Authentication Secret",
+    noshort = true)
+
 
   def zooKeeperHostAddresses: Seq[InetSocketAddress] =
     for (s <- zookeeperServers().split(",")) yield {

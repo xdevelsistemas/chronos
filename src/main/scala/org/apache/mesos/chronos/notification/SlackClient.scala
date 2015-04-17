@@ -7,9 +7,7 @@ import java.util.logging.Logger
 import org.apache.mesos.chronos.scheduler.jobs.BaseJob
 import com.fasterxml.jackson.core.JsonFactory
 
-class SlackClient(val webhookUrl: String,
-                  val token: String,
-                  val channel: String) extends NotificationClient {
+class SlackClient(val webhookUrl: String) extends NotificationClient {
 
   private[this] val log = Logger.getLogger(getClass.getName)
 
@@ -21,10 +19,13 @@ class SlackClient(val webhookUrl: String,
 
     // Create the payload
     generator.writeStartObject()
-    generator.writeStringField("channel", channel)
-
+    
     if (message.nonEmpty && message.get.nonEmpty) {
-      generator.writeStringField("text", message.get)
+      if (subject != null && subject.nonEmpty) {
+        generator.writeStringField("text", "%s: %s".format(subject, message.get))
+      } else {
+        generator.writeStringField("text", "%s".format(message.get))
+      }
     }
 
     generator.writeEndObject()
@@ -34,7 +35,7 @@ class SlackClient(val webhookUrl: String,
 
     var connection: HttpURLConnection = null
     try {
-      val url = new URL(webhookUrl + "?token=" + token)
+      val url = new URL(webhookUrl)
       connection = url.openConnection.asInstanceOf[HttpURLConnection]
       connection.setDoInput(true)
       connection.setDoOutput(true)

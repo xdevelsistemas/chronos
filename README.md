@@ -39,19 +39,23 @@ Also join us on IRC in #mesos on freenode.
     - [Adding a Scheduled Job](#adding-a-scheduled-job)
     - [Adding a Dependent Job](#adding-a-dependent-job)
     - [Adding a Docker Job] (#adding-a-docker-job)
+    - [Updating task progress] (#updating-task-progress)
     - [Describing the Dependency Graph](#describing-the-dependency-graph)
     - [Asynchronous Jobs](#asynchronous-jobs)
     - [Obtaining Remote Executables](#obtaining-remote-executables)
     - [Job Configuration](#job-configuration)
     - [Sample Job](#sample-job)
 * [Job Management](#job-management)
-* [Debugging Chronos Jobs](#debugging-chronos-jobs)
+* [Mesos Framework Authentication](#mesos-framework-authentication)
+* [Debugging Chronos](#debugging-chronos)
+* [Debugging Individual Jobs](#debugging-individual-jobs)
 * [Notes](#notes)
     - [Environment Variables Mesos Looks For](#environment-variables-mesos-looks-for)
 * [Reporting Bugs](#reporting-bugs)
 * [Appendix](#appendix)
     - [Finding a Node to Talk To](#finding-a-node-to-talk-to)
     - [Zookeeper](#zookeeper)
+    - [Cassandra](#cassandra)
     - [Install Chronos on Amazon Linux](#install-chronos-on-amazon-linux)
 
 
@@ -64,6 +68,7 @@ If you get an error while compiling Mesos, please consult the [FAQ](docs/FAQ.md)
 * 8601 Repeating Interval Notation
 * Handles dependencies
 * Job Stats (e.g. 50th, 75th, 95th and 99th percentile timing, failure/success)
+* Job History (e.g. job duration, start time, end time, failure/success)
 * Fault Tolerance (Hot Master)
 * Configurable Retries
 * Multiple Workers (i.e. Mesos Slaves)
@@ -125,6 +130,11 @@ The screenshot should give you a good idea of what Chronos can do.
 ![Chronos UI screenshot](https://raw.github.com/mesos/chronos/master/docs/chronos_ui-1.png "Chronos UI overview")
 
 ![Chronos UI screenshot new job](https://raw.github.com/mesos/chronos/master/docs/chronos_ui-new-job.png "Chronos UI new job")
+
+Additionally, Chronos can show statistics on past job execution. This may include aggregate statistics such as number of
+successful and failed executions. Per job execution statistics (i.e. duration and status) are also available, if a
+[cassandra cluster](http://cassandra.apache.org) is attached to Chronos. Please see the "Configuring Chronos" section
+on how to do this.
 
 ## API
 
@@ -323,6 +333,25 @@ To configure it, an additional container argument is required, which contains a 
 }
 ```
 
+###Updating Task Progress
+
+Task progress can be updated by providing the number of additional elements processed. This will increment the existing count of elements processed.
+A job name, task id, and number of additional elements (numAdditionalElementsProcessed) is required to update.
+This API endpoint requires Cassandra to be present in the cluster.
+
+* Endpoint: __/scheduler/job/<jobName>/task/<taskId>/progress__
+* Method: __POST__
+* Example:
+
+        curl -L -H 'Content-Type: application/json' -X POST -d '{json hash}' chronos-node:8080/scheduler/job/NewJob/task/ct%3A1428515194358%3A0%3ANewJob%3A/progress
+
+```json
+{
+    "numAdditionalElementsProcessed": 5
+}
+```
+
+
 ### Describing the Dependency Graph
 
 Chronos allows to describe the dependency graph and has an endpoint to return this graph in form of a dotfile.
@@ -366,6 +395,7 @@ you can also use a url in the command field, if your mesos was compiled with cUR
 | Field               | Description                                                                                              | Default                        |
 | ------------------- |----------------------------------------------------------------------------------------------------------| -------------------------------|
 | name                | Name of job.                                                                                             | -                              |
+| description         | Description of job.                                                                                      | -                              |
 | command             | Command to execute.                                                                                      | -                              |
 | arguments           | Arguments to pass to the command.  Ignored if `shell` is true                                            | -                              |
 | shell               | If true, Mesos will execute `command` by running `/bin/sh -c <command>` and ignore `arguments`. If false, `command` will be treated as the filename of an executable and `arguments` will be the arguments passed.  If this is a Docker job and `shell` is true, the entrypoint of the container will be overridden with `/bin/sh -c`                                                                                      | true                              |
@@ -374,6 +404,7 @@ you can also use a url in the command field, if your mesos was compiled with cUR
 | executorFlags       | Flags to pass to Mesos executor.                                                                         | -                              |
 | retries             | Number of retries to attempt if a command returns a non-zero status                                      | `2`                            |
 | owner               | Email addresses to send job failure notifications.  Use comma-separated list for multiple addresses.     | -                              |
+| owner name          | Name of the individual responsible for the job.                                                          | -                              |
 | async               | Execute using Async executor.                                                                            | `false`                        |
 | successCount        | Number of successes since the job was last modified.                                                     | -                              |
 | errorCount          | Number of errors since the job was last modified.                                                        | -                              |
@@ -389,6 +420,7 @@ you can also use a url in the command field, if your mesos was compiled with cUR
 | parents             | An array of parent jobs for a dependent job.  If specified, `schedule` must not be specified.            | -                              |
 | runAsUser           | Mesos will run the job as this user, if specified.                                                       | `--user`                       |
 | container           | This contains the subfields for the container, type (req), image (req), network (optional) and volumes (optional).          | -                              |
+| dataJob             | Toggles whether the job tracks data (number of elements processed)                                       | `false`                        |
 | environmentVariables| An array of environment variables passed to the Mesos executor. For Docker containers, these are also passed to Docker using the -e flag. | -                              |
 
 ### Sample Job
@@ -420,7 +452,8 @@ you can also use a url in the command field, if your mesos was compiled with cUR
    ],
    "schedule":"R/2014-03-08T20:00:00.000Z/PT2H",
    "environmentVariables": [
-     {"name": "FOO", "value": "BAR"}
+     {"name": "JVMOPTS", "value": "-Xmx1000m"},
+     {"name": "JAVA_LIBRARY_PATH", "value": "/usr/local/lib"}
    ]
 }
 ```
@@ -453,9 +486,40 @@ to live.
 
 Note: `chronos-sync.rb` does not delete jobs by default. You can pass the `--delete-missing` flag to `chronos-sync.rb` to remove jobs. Alternatively, you can manually remove it using the API or web UI.
 
-## Debugging Chronos Jobs
+## Mesos Framework Authentication
 
-Chronos itself can be configured just like [dropwizard-logging][logging] via the configuration file. If there's something going wrong with the framework itself look here for information. Individual jobs log with their task id on the mesos slaves.
+To enable framework authentication in Chronos:
+
+* Run Chronos with `--mesos_authentication_principal` set to a Mesos-authorized principal. For Mesos' built-in CRAM-MD5 authentication, you must also provide `--mesos_authentication_secret_file` pointing to a file containing your authentication secret.
+
+> The secret file cannot have a trailing newline. To not add a newline simply run:
+```bash
+$ echo -n "secret" > /path/to/secret/file
+```
+
+* If using the built-in CRAM-MD5 authentication mechanism, run mesos-master with the credentials flag and the path to the file with authorized users and their secrets.
+```bash
+--credentials=/path/to/credential/file
+```
+
+> Note that this `--credentials` file is for all frameworks and slaves registering with Mesos. In enterprise installations, the cluster admin will have already configured credentials in Mesos, so the user launching Chronos just needs to specify the principal+secret given to them by the cluster/security admin 
+> Each line in the file should be a principal and corresponding secret separated by a single space.
+```bash
+$ cat /path/to/credential/file
+principal secret
+principal2 secret2
+```
+
+## Debugging
+
+### Debugging Chronos
+
+Chronos uses log4j to control log output.  To override the standard log4j configuration,
+create a [log4j configuration file](http://logging.apache.org/log4j/1.2/manual.html) and
+add `-Dlog4j.configuration=file:<path to config>` to the Chronos startup command.
+
+### Debugging Individual Jobs
+Individual jobs log with their task id on the mesos slaves.
 Look in the standard out log for your job name and the string "ready for launch", or else "job ct:" and your job name.
 The job is done when the line in the log says:
 
@@ -544,6 +608,10 @@ If you use the cURL command line tool, you can use the `-L` flag and hit any Chr
 
 Chronos registers itself with [Zookeeper][Zookeeper] at the location `/chronos/state`. This value can be changed via the configuration file.
 
+### Cassandra
+
+Chronos uses [Cassandra] for task reporting. By default, Chronos attempts to connect to the `metrics` keyspace.
+
 
 [arx]: https://github.com/solidsnack/arx
 [ISO8601]: http://en.wikipedia.org/wiki/ISO_8601 "ISO8601 Standard"
@@ -551,7 +619,7 @@ Chronos registers itself with [Zookeeper][Zookeeper] at the location `/chronos/s
 [mesos]: https://mesos.apache.org/ "Apache Mesos"
 [logging]: http://dropwizard.io/manual/core.html#logging
 [Zookeeper]: https://zookeeper.apache.org/
-
+[Cassandra]: http://cassandra.apache.org
 
 ### Install Chronos on Amazon Linux
 

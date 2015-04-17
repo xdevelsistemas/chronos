@@ -50,6 +50,14 @@ class JobDeserializer extends JsonDeserializer[BaseJob] {
       if (node.has("owner") && node.get("owner") != null) node.get("owner").asText
       else ""
 
+    val ownerName =
+      if (node.has("ownerName") && node.get("ownerName") != null) node.get("ownerName").asText
+      else ""
+
+    val description =
+      if (node.has("description") && node.get("description") != null) node.get("description").asText
+      else ""
+
     val async =
       if (node.has("async") && node.get("async") != null) node.get("async").asBoolean
       else false
@@ -60,6 +68,10 @@ class JobDeserializer extends JsonDeserializer[BaseJob] {
 
     val softError =
       if (node.has("softError") && node.get("softError") != null) node.get("softError").asBoolean
+      else false
+
+    val dataProcessingJobType =
+      if (node.has("dataProcessingJobType") && node.get("dataProcessingJobType") != null) node.get("dataProcessingJobType").asBoolean
       else false
 
     val successCount =
@@ -160,28 +172,32 @@ class JobDeserializer extends JsonDeserializer[BaseJob] {
       }
       new DependencyBasedJob(parents = parentList.toSet,
         name = name, command = command, epsilon = epsilon, successCount = successCount, errorCount = errorCount,
-        executor = executor, executorFlags = executorFlags, retries = retries, owner = owner, lastError = lastError,
-        lastSuccess = lastSuccess, async = async, cpus = cpus, disk = disk, mem = mem, disabled = disabled,
+        executor = executor, executorFlags = executorFlags, retries = retries, owner = owner,
+        ownerName = ownerName, description = description, lastError = lastError, lastSuccess = lastSuccess,
+        async = async, cpus = cpus, disk = disk, mem = mem, disabled = disabled,
         errorsSinceLastSuccess = errorsSinceLastSuccess, uris = uris, highPriority = highPriority,
         runAsUser = runAsUser, container = container, environmentVariables = environmentVariables, shell = shell,
-        arguments = arguments, softError = softError)
+        arguments = arguments, softError = softError, dataProcessingJobType = dataProcessingJobType)
     } else if (node.has("schedule")) {
       val scheduleTimeZone = if (node.has("scheduleTimeZone")) node.get("scheduleTimeZone").asText else ""
       new ScheduleBasedJob(node.get("schedule").asText, name = name, command = command,
         epsilon = epsilon, successCount = successCount, errorCount = errorCount, executor = executor,
-        executorFlags = executorFlags, retries = retries, owner = owner, lastError = lastError,
-        lastSuccess = lastSuccess, async = async, cpus = cpus, disk = disk, mem = mem, disabled = disabled,
-        errorsSinceLastSuccess = errorsSinceLastSuccess, uris = uris, highPriority = highPriority,
+        executorFlags = executorFlags, retries = retries, owner = owner, ownerName = ownerName,
+        description = description, lastError = lastError, lastSuccess = lastSuccess, async = async,
+        cpus = cpus, disk = disk, mem = mem, disabled = disabled,
+        errorsSinceLastSuccess = errorsSinceLastSuccess, uris = uris,  highPriority = highPriority,
         runAsUser = runAsUser, container = container, scheduleTimeZone = scheduleTimeZone,
-        environmentVariables = environmentVariables, shell = shell, arguments = arguments, softError = softError)
+        environmentVariables = environmentVariables, shell = shell, arguments = arguments, softError = softError,
+        dataProcessingJobType = dataProcessingJobType)
     } else {
       /* schedule now */
       new ScheduleBasedJob("R1//PT24H", name = name, command = command, epsilon = epsilon, successCount = successCount,
         errorCount = errorCount, executor = executor, executorFlags = executorFlags, retries = retries, owner = owner,
-        lastError = lastError, lastSuccess = lastSuccess, async = async, cpus = cpus, disk = disk, mem = mem,
-        disabled = disabled, errorsSinceLastSuccess = errorsSinceLastSuccess, uris = uris, highPriority = highPriority,
+        ownerName = ownerName, description = description, lastError = lastError, lastSuccess = lastSuccess,
+        async = async, cpus = cpus, disk = disk, mem = mem, disabled = disabled,
+        errorsSinceLastSuccess = errorsSinceLastSuccess, uris = uris,  highPriority = highPriority,
         runAsUser = runAsUser, container = container, environmentVariables = environmentVariables, shell = shell,
-        arguments = arguments, softError = softError)
+        arguments = arguments, softError = softError, dataProcessingJobType = dataProcessingJobType)
     }
   }
 }
