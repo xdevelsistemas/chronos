@@ -8,5 +8,5 @@ RUN mvn clean package
 
 EXPOSE 8081
 
-ENTRYPOINT ["bin/start-chronos.bash"]
+CMD ["bin/start-chronos.bash"]
 
