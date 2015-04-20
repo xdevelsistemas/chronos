@@ -8,10 +8,10 @@ RUN mvn clean package
 
 RUN /etc/init.d/zookeeper start
 
-EXPOSE 8081
+EXPOSE 2181 8080
 
 VOLUME ["/etc/zookeeper", "/var/lib/zookeeper"]
 
 
-CMD ["bin/start-chronos.bash","--http_port 8081"]
+CMD ["bin/start-chronos.bash"]
 
