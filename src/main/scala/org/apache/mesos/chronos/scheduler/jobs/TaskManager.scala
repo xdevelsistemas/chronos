@@ -9,6 +9,7 @@ import com.google.common.util.concurrent.{ListenableFutureTask, ListeningSchedul
 import com.google.inject.Inject
 import org.apache.mesos.Protos.{TaskID, TaskState}
 import org.apache.mesos.chronos.scheduler.graph.JobGraph
+import org.apache.mesos.chronos.scheduler.jobs.stats.{CurrentState, JobStats}
 import org.apache.mesos.chronos.scheduler.mesos.MesosDriverFactory
 import org.apache.mesos.chronos.scheduler.state.PersistenceStore
 import org.joda.time.{DateTime, DateTimeZone}
@@ -24,7 +25,7 @@ class TaskManager @Inject()(val listeningExecutor: ListeningScheduledExecutorSer
                             val persistenceStore: PersistenceStore,
                             val jobGraph: JobGraph,
                             val mesosDriver: MesosDriverFactory,
-                            val jobStats: JobStats,
+                            val jobsObserver: JobsObserver.Observer,
                             val registry: MetricRegistry) {
 
   val log = Logger.getLogger(getClass.getName)
@@ -43,7 +44,8 @@ class TaskManager @Inject()(val listeningExecutor: ListeningScheduledExecutorSer
 
   val taskCache = CacheBuilder.newBuilder().maximumSize(5000L).build[String, TaskState]()
 
-  val taskMapping: concurrent.Map[String, mutable.ListBuffer[(String, Future[_])]] = new ConcurrentHashMap().asScala
+  val taskMapping: concurrent.Map[String, mutable.ListBuffer[(String, Future[_])]] =
+    new ConcurrentHashMap[String, mutable.ListBuffer[(String, Future[_])]]().asScala
 
   val queueGauge = registry.register(
     MetricRegistry.name(classOf[TaskManager], "queueSize"),
@@ -76,12 +78,6 @@ class TaskManager @Inject()(val listeningExecutor: ListeningScheduledExecutorSer
     } else {
       log.info(s"$name queue contains task: $taskId")
       val jobOption = jobGraph.getJobForName(TaskUtils.getJobNameForTaskId(taskId))
-      val jobArguments = TaskUtils.getJobArgumentsForTaskId(taskId)
-      var job = jobOption.get
-
-      if (jobArguments != null && !jobArguments.isEmpty) {
-        job = JobUtils.getJobWithArguments(job, jobArguments)
-      }
 
       //If the job was deleted after the taskId was added to the queue, the task could be empty.
       if (jobOption.isEmpty) {
@@ -89,9 +85,16 @@ class TaskManager @Inject()(val listeningExecutor: ListeningScheduledExecutorSer
         removeTask(taskId)
         None
       } else if (jobOption.get.disabled) {
-        jobStats.updateJobState(jobOption.get.name, CurrentState.idle)
+        jobsObserver.apply(JobExpired(jobOption.get, taskId))
         None
       } else {
+        val jobArguments = TaskUtils.getJobArgumentsForTaskId(taskId)
+        var job = jobOption.get
+
+        if (jobArguments != null && !jobArguments.isEmpty) {
+          job = JobUtils.getJobWithArguments(job, jobArguments)
+        }
+
         Some(taskId, job)
       }
     }
@@ -126,14 +129,13 @@ class TaskManager @Inject()(val listeningExecutor: ListeningScheduledExecutorSer
    * Cancels all tasks that are delay scheduled with the underlying executor.
    */
   def flush() {
-    taskMapping.clone().values.map({
-      f =>
-        f.foreach({
-          (f) =>
-            log.info("Cancelling task '%s'".format(f._1))
-            f._2.cancel(true)
-        })
-    })
+    taskMapping.clone().values.foreach (
+      _.foreach {
+        case (taskId, futureTask) =>
+            log.info("Cancelling task '%s'".format(taskId))
+            futureTask.cancel(true)
+      }
+    )
     taskMapping.clear()
     queues.foreach(_.clear())
   }
@@ -155,9 +157,9 @@ class TaskManager @Inject()(val listeningExecutor: ListeningScheduledExecutorSer
      if (jobOption.isEmpty) {
       log.warning("Job '%s' no longer registered.".format(jobName))
     } else {
-        val (_, start, attempt, _) = TaskUtils.parseTaskId(taskId)
+        val (_, _, attempt, _) = TaskUtils.parseTaskId(taskId)
         val job = jobOption.get
-        jobStats.jobQueued(job, attempt)
+        jobsObserver.apply(JobQueued(job, taskId, attempt))
     }
   }
 

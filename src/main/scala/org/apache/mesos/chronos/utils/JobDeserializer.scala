@@ -1,13 +1,15 @@
 package org.apache.mesos.chronos.utils
 
 import org.apache.mesos.chronos.scheduler.config.SchedulerConfiguration
-import org.apache.mesos.chronos.scheduler.jobs.{BaseJob, DependencyBasedJob, DockerContainer, EnvironmentVariable, NetworkMode, ScheduleBasedJob, Volume, VolumeMode}
+import org.apache.mesos.chronos.scheduler.jobs._
+import org.apache.mesos.chronos.scheduler.jobs.constraints._
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.databind.{DeserializationContext, JsonDeserializer, JsonNode}
 import org.joda.time.Period
 
 import scala.collection.JavaConversions._
+import scala.util.Try
 
 object JobDeserializer {
   var config: SchedulerConfiguration = _
@@ -162,7 +164,23 @@ class JobDeserializer extends JsonDeserializer[BaseJob] {
             Volume(hostPath, node.get("containerPath").asText, mode)
         }.foreach(volumes.add)
       }
-      container = DockerContainer(containerNode.get("image").asText, volumes, networkMode)
+
+      val forcePullImage =
+        if (containerNode.has("forcePullImage") && containerNode.get("forcePullImage") != null)
+          Try(containerNode.get("forcePullImage").asText.toBoolean).getOrElse(false)
+        else false
+      container = DockerContainer(containerNode.get("image").asText, volumes, networkMode, forcePullImage)
+    }
+
+    val constraints = scala.collection.mutable.ListBuffer[Constraint]()
+    if (node.has("constraints")) {
+      for (c <- node.path("constraints")) {
+        c.get(1).asText match {
+          case EqualsConstraint.OPERATOR =>
+            constraints.add(EqualsConstraint(c.get(0).asText, c.get(2).asText))
+          case _ =>
+        }
+      }
     }
 
     var parentList = scala.collection.mutable.ListBuffer[String]()
@@ -177,7 +195,8 @@ class JobDeserializer extends JsonDeserializer[BaseJob] {
         async = async, cpus = cpus, disk = disk, mem = mem, disabled = disabled,
         errorsSinceLastSuccess = errorsSinceLastSuccess, uris = uris, highPriority = highPriority,
         runAsUser = runAsUser, container = container, environmentVariables = environmentVariables, shell = shell,
-        arguments = arguments, softError = softError, dataProcessingJobType = dataProcessingJobType)
+        arguments = arguments, softError = softError, dataProcessingJobType = dataProcessingJobType,
+        constraints = constraints)
     } else if (node.has("schedule")) {
       val scheduleTimeZone = if (node.has("scheduleTimeZone")) node.get("scheduleTimeZone").asText else ""
       new ScheduleBasedJob(node.get("schedule").asText, name = name, command = command,
@@ -188,7 +207,7 @@ class JobDeserializer extends JsonDeserializer[BaseJob] {
         errorsSinceLastSuccess = errorsSinceLastSuccess, uris = uris,  highPriority = highPriority,
         runAsUser = runAsUser, container = container, scheduleTimeZone = scheduleTimeZone,
         environmentVariables = environmentVariables, shell = shell, arguments = arguments, softError = softError,
-        dataProcessingJobType = dataProcessingJobType)
+        dataProcessingJobType = dataProcessingJobType, constraints = constraints)
     } else {
       /* schedule now */
       new ScheduleBasedJob("R1//PT24H", name = name, command = command, epsilon = epsilon, successCount = successCount,
@@ -197,7 +216,8 @@ class JobDeserializer extends JsonDeserializer[BaseJob] {
         async = async, cpus = cpus, disk = disk, mem = mem, disabled = disabled,
         errorsSinceLastSuccess = errorsSinceLastSuccess, uris = uris,  highPriority = highPriority,
         runAsUser = runAsUser, container = container, environmentVariables = environmentVariables, shell = shell,
-        arguments = arguments, softError = softError, dataProcessingJobType = dataProcessingJobType)
+        arguments = arguments, softError = softError, dataProcessingJobType = dataProcessingJobType,
+        constraints = constraints)
     }
   }
 }

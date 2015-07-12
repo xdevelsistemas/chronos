@@ -1,5 +1,6 @@
 package org.apache.mesos.chronos.scheduler.api
 
+import org.apache.mesos.chronos.scheduler.jobs.constraints.EqualsConstraint
 import org.apache.mesos.chronos.scheduler.jobs.{DependencyBasedJob, DockerContainer, EnvironmentVariable, ScheduleBasedJob, _}
 import org.apache.mesos.chronos.utils.{JobDeserializer, JobSerializer}
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -27,16 +28,19 @@ class SerDeTest extends SpecificationWithJUnit {
         Volume(None, "container/dir", None)
       )
 
-      val container = DockerContainer("dockerImage", volumes, NetworkMode.BRIDGE)
+      val forcePullImage = false
+      val container = DockerContainer("dockerImage", volumes, NetworkMode.BRIDGE, forcePullImage)
 
       val arguments = Seq(
         "-testOne"
       )
 
+      val constraints = List(EqualsConstraint("rack", "rack-1"))
+
       val a = new DependencyBasedJob(Set("B", "C", "D", "E"), "A", "noop", Minutes.minutes(5).toPeriod, 10L,
         20L, "fooexec", "fooflags", 7, "foo@bar.com", "Foo", "Test dependency-based job", "TODAY",
         "YESTERDAY", true, container = container, environmentVariables = environmentVariables,
-        shell = false, arguments = arguments, softError = true)
+        shell = false, arguments = arguments, softError = true, constraints = constraints)
 
       val aStr = objectMapper.writeValueAsString(a)
       val aCopy = objectMapper.readValue(aStr, classOf[DependencyBasedJob])
@@ -61,16 +65,19 @@ class SerDeTest extends SpecificationWithJUnit {
         Volume(None, "container/dir", None)
       )
 
-      val container = DockerContainer("dockerImage", volumes, NetworkMode.HOST)
+      val forcePullImage = true
+      val container = DockerContainer("dockerImage", volumes, NetworkMode.HOST, forcePullImage)
 
       val arguments = Seq(
         "-testOne"
       )
 
+      val constraints = List(EqualsConstraint("rack", "rack-1"))
+
       val a = new ScheduleBasedJob("FOO/BAR/BAM", "A", "noop", Minutes.minutes(5).toPeriod, 10L, 20L,
         "fooexec", "fooflags", 7, "foo@bar.com", "Foo", "Test schedule-based job", "TODAY",
         "YESTERDAY", true, container = container, environmentVariables = environmentVariables,
-        shell = true, arguments = arguments, softError = true)
+        shell = true, arguments = arguments, softError = true, constraints = constraints)
 
       val aStr = objectMapper.writeValueAsString(a)
       val aCopy = objectMapper.readValue(aStr, classOf[ScheduleBasedJob])

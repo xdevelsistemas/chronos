@@ -9,14 +9,12 @@ import org.apache.mesos.chronos.scheduler.config.{CassandraConfiguration, Schedu
 import org.apache.mesos.chronos.scheduler.graph.JobGraph
 import org.apache.mesos.chronos.scheduler.jobs._
 
-import com.codahale.metrics.Histogram
-import com.datastax.driver.core.Row
-import com.datastax.driver.core.ColumnDefinitions
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.module.SimpleModule
 
 import com.codahale.metrics.annotation.Timed
 import com.google.inject.Inject
+import org.apache.mesos.chronos.scheduler.jobs.stats.JobStats
 import org.joda.time.{DateTime, DateTimeZone}
 
 import scala.collection.mutable.ListBuffer
@@ -33,6 +31,7 @@ class JobManagementResource @Inject()(val jobScheduler: JobScheduler,
                                       val jobGraph: JobGraph,
                                       val configuration: SchedulerConfiguration,
                                       val cassandraConfig: CassandraConfiguration,
+                                      val jobStats: JobStats,
                                       val jobMetrics: JobMetrics) {
 
   private[this] val log = Logger.getLogger(getClass.getName)
@@ -100,18 +99,19 @@ class JobManagementResource @Inject()(val jobScheduler: JobScheduler,
             }
         }
       }
-      jobScheduler.sendNotification(job, "[Chronos] - Your job '%s' was deleted!".format(jobName))
-
+      // No need to send notifications here, the jobScheduler.deregisterJob will do it
       jobScheduler.deregisterJob(job, persist = true)
       Response.noContent().build
     } catch {
-      case ex: IllegalArgumentException =>
+      case ex: IllegalArgumentException => {
         log.log(Level.INFO, "Bad Request", ex)
         Response.status(Response.Status.BAD_REQUEST).entity(ex.getMessage)
           .build()
-      case ex: Exception =>
+      }
+      case ex: Exception => {
         log.log(Level.WARNING, "Exception while serving request", ex)
         Response.serverError().build
+      }
     }
   }
 
@@ -120,10 +120,10 @@ class JobManagementResource @Inject()(val jobScheduler: JobScheduler,
   def getStat(@PathParam("jobName") jobName: String): Response = {
     try {
       val jobOpt = jobGraph.lookupVertex(jobName)
-      require(!jobOpt.isEmpty, "Job '%s' not found".format(jobName))
+      require(jobOpt.nonEmpty, "Job '%s' not found".format(jobName))
 
       val histoStats = jobMetrics.getJobHistogramStats(jobName)
-      val jobStatsList: List[TaskStat] = jobScheduler.jobStats.getMostRecentTaskStatsByJob(jobOpt.get, cassandraConfig.jobHistoryLimit())
+      val jobStatsList: List[TaskStat] = jobStats.getMostRecentTaskStatsByJob(jobOpt.get, cassandraConfig.jobHistoryLimit())
       val jobStatsWrapper = new JobStatWrapper(jobStatsList, histoStats)
 
       val wrapperStr = objectMapper.writeValueAsString(jobStatsWrapper)
@@ -172,32 +172,27 @@ class JobManagementResource @Inject()(val jobScheduler: JobScheduler,
           @PathParam("taskId") taskId: String,
           taskStat: TaskStat) : Response = {
     try {
-      var jobOpt = jobGraph.lookupVertex(jobName)
-      require(!jobOpt.isEmpty, "Job '%s' not found".format(jobName))
+      val jobOpt = jobGraph.lookupVertex(jobName)
+      require(jobOpt.nonEmpty, "Job '%s' not found".format(jobName))
       require(TaskUtils.isValidVersion(taskId), "Invalid task id format %s".format(taskId))
       require(jobOpt.get.dataProcessingJobType, "Job '%s' is not enabled to track data".format(jobName))
 
-      taskStat.numAdditionalElementsProcessed match {
-        case Some(num: Int) => {
+      taskStat.numAdditionalElementsProcessed.foreach {
+        num =>
           //NOTE: 0 is a valid value
           require(num >= 0,
             "numAdditionalElementsProcessed (%d) is not positive".format(num))
 
-          jobScheduler.jobStats.updateTaskProgress(jobOpt.get, taskId, num)
-        }
-        case None =>
+          jobStats.updateTaskProgress(jobOpt.get, taskId, num)
       }
       Response.noContent().build
     } catch {
-      case ex: IllegalArgumentException => {
+      case ex: IllegalArgumentException =>
         log.log(Level.INFO, "Bad Request", ex)
-        Response.status(Response.Status.BAD_REQUEST).entity(ex.getMessage)
-          .build()
-      }
-      case ex: Exception => {
+        Response.status(Response.Status.BAD_REQUEST).entity(ex.getMessage).build
+      case ex: Exception =>
         log.log(Level.WARNING, "Exception while serving request", ex)
         Response.serverError().build
-      }
     }
   }
 

@@ -4,14 +4,15 @@ import java.util.logging.Logger
 
 import org.apache.mesos.chronos.scheduler.config.SchedulerConfiguration
 import org.apache.mesos.chronos.scheduler.jobs._
+import org.apache.mesos.chronos.scheduler.jobs.constraints.Constraint
 import org.apache.mesos.chronos.utils.JobDeserializer
 import com.google.inject.Inject
 import mesosphere.mesos.util.FrameworkIdUtil
-import mesosphere.util.BackToTheFuture
 import org.apache.mesos.Protos._
 import org.apache.mesos.{Protos, Scheduler, SchedulerDriver}
 import org.joda.time.DateTime
 
+import scala.annotation.tailrec
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.{Buffer, HashMap, HashSet}
@@ -99,6 +100,16 @@ import scala.concurrent.ExecutionContext.Implicits.global
   def generateLaunchableTasks(offerResources: mutable.HashMap[Offer, Resources]): mutable.Buffer[(String, BaseJob, Offer)] = {
     val tasks = mutable.Buffer[(String, BaseJob, Offer)]()
 
+    def checkConstraints(attributes: Seq[Protos.Attribute], constraints: Seq[Constraint]): Boolean = {
+      constraints.foreach { c =>
+        if (!c.matches(attributes)) {
+          return false
+        }
+      }
+      true
+    }
+
+    @tailrec
     def generate() {
       taskManager.getTask match {
         case None => log.info("No tasks scheduled or next task has been disabled.\n")
@@ -115,14 +126,20 @@ import scala.concurrent.ExecutionContext.Implicits.global
                 generate()
               case None =>
                 val neededResources = new Resources(job)
-                offerResources.toIterator.find(_._2.canSatisfy(neededResources)) match {
+                offerResources.toIterator.find { ors =>
+                  ors._2.canSatisfy(neededResources) && checkConstraints(ors._1.getAttributesList.asScala, job.constraints)
+                } match {
                   case Some((offer, resources)) =>
                     // Subtract this job's resource requirements from the remaining available resources in this offer.
                     resources -= neededResources
                     tasks.append((taskId, job, offer))
                     generate()
                   case None =>
-                    log.warning("Insufficient resources remaining for task '%s', will append to queue\n.".format(taskId))
+                    val foundResources = offerResources.toIterator.map(_._2.toString()).mkString(",")
+                    log.warning(
+                      "Insufficient resources remaining for task '%s', will append to queue. (Needed: [%s], Found: [%s])"
+                        .stripMargin.format(taskId, neededResources, foundResources)
+                    )
                     taskManager.enqueue(taskId, job.highPriority)
                 }
             }
@@ -158,9 +175,6 @@ import scala.concurrent.ExecutionContext.Implicits.global
       )
       if (status == Protos.Status.DRIVER_RUNNING) {
         for (task <- tasks) {
-          val deleted = taskManager.removeTask(task._1)
-          log.fine("Successfully launched task '%s' via chronos, task records successfully deleted: '%b'"
-            .format(task._1, deleted))
           runningTasks.put(task._2.name, new ChronosTask(task._3.getSlaveId.getValue))
 
           //TODO(FL): Handle case if chronos can't launch the task.
@@ -211,7 +225,8 @@ import scala.concurrent.ExecutionContext.Implicits.global
         log.info("Task with id '%s' LOST".format(taskStatus.getTaskId.getValue))
         scheduler.handleFailedTask(taskStatus)
       case TaskState.TASK_RUNNING =>
-        log.info("Task with id '%s' RUNNING.".format(taskStatus.getTaskId.getValue))
+        log.info("Task with id '%s' RUNNING. Removing persistence task.".format(taskStatus.getTaskId.getValue))
+        taskManager.removeTask(taskStatus.getTaskId.getValue)
       case TaskState.TASK_KILLED =>
         log.info("Task with id '%s' KILLED.".format(taskStatus.getTaskId.getValue))
         scheduler.handleKilledTask(taskStatus)
@@ -311,7 +326,7 @@ import scala.concurrent.ExecutionContext.Implicits.global
 
   object Resources {
     def apply(offer: Offer): Resources = {
-      val resources = offer.getResourcesList.asScala.filter(r => !r.hasRole || r.getRole == config.mesosRole())
+      val resources = offer.getResourcesList.asScala.filter(r => !r.hasRole || r.getRole == "*" || r.getRole == config.mesosRole())
       new Resources(
         getScalarValueOrElse(resources.find(_.getName == "cpus"), 0),
         getScalarValueOrElse(resources.find(_.getName == "mem"), 0),

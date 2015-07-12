@@ -1,6 +1,7 @@
 package org.apache.mesos.chronos.utils
 
 import org.apache.mesos.chronos.scheduler.jobs.{BaseJob, DependencyBasedJob, ScheduleBasedJob}
+import org.apache.mesos.chronos.scheduler.jobs.constraints.EqualsConstraint
 import com.fasterxml.jackson.core.JsonGenerator
 import com.fasterxml.jackson.databind.{JsonSerializer, SerializerProvider}
 
@@ -120,21 +121,37 @@ class JobSerializer extends JsonSerializer[BaseJob] {
       json.writeStartArray()
       baseJob.container.volumes.foreach { v =>
         json.writeStartObject()
-        v.hostPath.map { hostPath =>
+        v.hostPath.foreach { hostPath =>
           json.writeFieldName("hostPath")
           json.writeString(hostPath)
         }
         json.writeFieldName("containerPath")
         json.writeString(v.containerPath)
-        v.mode.map { mode =>
+        v.mode.foreach { mode =>
           json.writeFieldName("mode")
           json.writeString(mode.toString)
         }
         json.writeEndObject()
       }
       json.writeEndArray()
+      json.writeFieldName("forcePullImage")
+      json.writeBoolean(baseJob.container.forcePullImage)
       json.writeEndObject()
     }
+
+    json.writeFieldName("constraints")
+    json.writeStartArray()
+    baseJob.constraints.foreach { v =>
+      json.writeStartArray()
+      v match {
+        case EqualsConstraint(attribute, value) =>
+          json.writeString(attribute)
+          json.writeString(EqualsConstraint.OPERATOR)
+          json.writeString(value)
+      }
+      json.writeEndArray()
+    }
+    json.writeEndArray()
 
     baseJob match {
       case depJob: DependencyBasedJob =>
